@@ -35,8 +35,8 @@ struct PushConsts {
     base_high: u32,
 }
 
-const BATCH_EXP: u32 = 24;
-const BATCH_SIZE: usize = 1 << BATCH_EXP;
+const BATCH_MAX: u64 = 1 << 24;
+const WORKGROUP_SIZE: u32 = 64;
 
 fn format_duration(seconds: f64) -> String {
     let total_seconds = seconds as u64;
@@ -75,6 +75,7 @@ struct ThreadContext {
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     descriptor_set: Arc<DescriptorSet>,
     output_buffer: Subbuffer<[f64]>,
+    batch_size: usize,
 }
 
 impl ThreadContext {
@@ -85,6 +86,7 @@ impl ThreadContext {
         mem_alloc: Arc<StandardMemoryAllocator>,
         ds_alloc: Arc<StandardDescriptorSetAllocator>,
         cb_alloc: Arc<StandardCommandBufferAllocator>,
+        batch_size: usize,
     ) -> Self {
         let output_buffer = Buffer::from_iter(
             mem_alloc,
@@ -97,7 +99,7 @@ impl ThreadContext {
                     | MemoryTypeFilter::HOST_RANDOM_ACCESS,
                 ..Default::default()
             },
-            (0..BATCH_SIZE).map(|_| 0.0f64),
+            (0..batch_size).map(|_| 0.0f64),
         )
         .unwrap();
 
@@ -116,6 +118,7 @@ impl ThreadContext {
             command_buffer_allocator: cb_alloc,
             descriptor_set,
             output_buffer,
+            batch_size,
         }
     }
 
@@ -132,6 +135,8 @@ impl ThreadContext {
         )
         .unwrap();
 
+        let dispatch_x = (self.batch_size as u32) / WORKGROUP_SIZE;
+
         unsafe {
             builder
                 .bind_pipeline_compute(self.pipeline.clone())
@@ -145,7 +150,7 @@ impl ThreadContext {
                 .unwrap()
                 .push_constants(self.pipeline.layout().clone(), 0, push)
                 .unwrap()
-                .dispatch([(BATCH_SIZE as u32 / 64), 1, 1])
+                .dispatch([dispatch_x, 1, 1])
                 .unwrap();
         }
 
@@ -162,7 +167,7 @@ impl ThreadContext {
         let mut max_ulp = 0;
         let data = self.output_buffer.read().unwrap();
 
-        for i in 0..BATCH_SIZE {
+        for i in 0..self.batch_size {
             let bits = base_bits.wrapping_add(i as u64);
             if bits >= end_limit_bits {
                 break;
@@ -216,7 +221,15 @@ fn main() {
         })
         .unwrap();
 
-    println!("Using device: {}", physical_device.properties().device_name);
+    let properties = physical_device.properties();
+    println!("Using device: {}", properties.device_name);
+
+    let max_group_count = (properties.max_compute_work_group_count[0] as u64);
+    let max_dispatch_size = max_group_count * (WORKGROUP_SIZE as u64);
+
+    let batch_size = std::cmp::min(max_dispatch_size, BATCH_MAX) as usize;
+
+    println!("Queried max_compute_work_group_count: {}", max_group_count);
 
     let (device, mut queues) = Device::new(
         physical_device,
@@ -303,15 +316,15 @@ void main() {
     let end_bits: u64 = 2.0f64.to_bits();
     let total_elements = end_bits - start_bits;
 
-    let step_stride = BATCH_SIZE as u64;
+    let step_stride = batch_size as u64;
     let total_batches = (total_elements + step_stride - 1) / step_stride;
 
     println!("Start Bits: {:#018x}", start_bits);
     println!("End Bits:   {:#018x}", end_bits);
     println!(
         "Batch Size: {} elements ({:.1} MB)",
-        BATCH_SIZE,
-        (BATCH_SIZE * 8) as f64 / 1024.0 / 1024.0
+        batch_size,
+        (batch_size * 8) as f64 / 1024.0 / 1024.0
     );
     println!("Total Batches to process: {}", total_batches);
 
@@ -319,7 +332,7 @@ void main() {
     let processed_batches = Arc::new(AtomicU64::new(0));
 
     let global_max_ulp = (start_bits..end_bits)
-        .step_by(BATCH_SIZE)
+        .step_by(batch_size)
         .par_bridge()
         .map_init(
             || {
@@ -330,6 +343,7 @@ void main() {
                     mem_alloc_shared.clone(),
                     ds_alloc_shared.clone(),
                     cb_alloc_shared.clone(),
+                    batch_size,
                 )
             },
             |ctx, base_idx| {
