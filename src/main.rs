@@ -155,6 +155,8 @@ enum Operation {
     Rsqrt,
     Sin,
     Cos,
+    Mul,
+    Add,
 }
 
 #[derive(Clone, Default)]
@@ -177,6 +179,8 @@ impl Operation {
             Operation::Rsqrt => "rsqrt",
             Operation::Sin => "sin",
             Operation::Cos => "cos",
+            Operation::Mul => "mul (x*x)",
+            Operation::Add => "add (x+x)",
         }
     }
 
@@ -188,6 +192,8 @@ impl Operation {
             Operation::Rsqrt => format!("{}float result = 1.0 / sqrt(val);", precise_kw),
             Operation::Sin => format!("{}float result = sin(val);", precise_kw),
             Operation::Cos => format!("{}float result = cos(val);", precise_kw),
+            Operation::Mul => format!("{}float result = val * val;", precise_kw),
+            Operation::Add => format!("{}float result = val + val;", precise_kw),
         }
     }
 
@@ -199,6 +205,8 @@ impl Operation {
             Operation::Rsqrt => format!("{}double result = 1.0lf / sqrt(val);", precise_kw),
             Operation::Sin => format!("{}double result = sin(val);", precise_kw),
             Operation::Cos => format!("{}double result = cos(val);", precise_kw),
+            Operation::Mul => format!("{}double result = val * val;", precise_kw),
+            Operation::Add => format!("{}double result = val + val;", precise_kw),
         }
     }
 
@@ -209,6 +217,8 @@ impl Operation {
             Operation::Rsqrt => 1.0 / x.sqrt(),
             Operation::Sin => x.sin(),
             Operation::Cos => x.cos(),
+            Operation::Mul => x * x,
+            Operation::Add => x + x,
         }
     }
 
@@ -219,6 +229,8 @@ impl Operation {
             Operation::Rsqrt => 1.0 / x.sqrt(),
             Operation::Sin => x.sin(),
             Operation::Cos => x.cos(),
+            Operation::Mul => x * x,
+            Operation::Add => x + x,
         }
     }
 }
@@ -857,6 +869,8 @@ fn print_usage() {
     println!("  rsqrt   - Reciprocal square root (1.0 / sqrt(x))");
     println!("  sin     - Sine");
     println!("  cos     - Cosine");
+    println!("  mul     - Multiplication");
+    println!("  add     - Addition");
     println!();
     println!("Float control options:");
     println!("  --precise       Use 'precise' qualifier (adds NoContraction SPIR-V decoration)");
@@ -890,6 +904,8 @@ fn parse_operation(s: &str) -> Option<Operation> {
         "rsqrt" | "invsqrt" => Some(Operation::Rsqrt),
         "sin" => Some(Operation::Sin),
         "cos" => Some(Operation::Cos),
+        "mul" => Some(Operation::Mul),
+        "add" => Some(Operation::Add),
         _ => None,
     }
 }
